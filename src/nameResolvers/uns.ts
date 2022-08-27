@@ -1,6 +1,6 @@
 import { HttpClient } from '@chainify/client';
 import { Nullable } from '@chainify/types';
-import { ChainId } from '@liquality/cryptoassets';
+import { Asset, AssetTypes, ChainId } from '@liquality/cryptoassets';
 import { Resolution } from '@unstoppabledomains/resolution';
 import buildConfig from '../build.config';
 
@@ -9,48 +9,50 @@ const resolution = new Resolution()
 const unsConfig = buildConfig.nameResolvers.uns
 interface NameResolver {
     reverseLookup(address: string): Promise<Nullable<string>>
-    lookupDomain(address: string, chainId: ChainId): Promise<Nullable<string>>
+    lookupDomain(address: string, asset: Asset): Promise<Nullable<string>>
     isValidTLD(domain: string): Promise<boolean>
 }
 
 export class UNSResolver implements NameResolver {
     supportedTlds: string[] | null
-    getUNSKey(chainId: ChainId): string {
-        const unsKey = this.chainToUNSKey(chainId)
-        return 'crypto.' + unsKey + '.address'
+    getUNSKey(asset: Asset, noVersion: boolean = false): string {
+        const symbol = asset.matchingAsset ? asset.matchingAsset : asset.code
+        if(noVersion){
+            return `crypto.${symbol}.address`
+        }
+        const chainKey = this.multiAssetChainKey(asset.chain)
+        if(chainKey){
+            if(asset.type == AssetTypes.native && asset.chain != ChainId.Polygon){
+                return `crypto.${symbol}.address`
+            }
+            return `crypto.${symbol}.version.${chainKey}.address`
+        }else{
+            return `crypto.${symbol}.address`
+        }
     }
-
-    chainToUNSKey(chainId: ChainId): string {
+    
+    multiAssetChainKey(chainId: ChainId): string | null {
         switch (chainId) {
-            case ChainId.Bitcoin:
-                return 'BTC'
             case ChainId.Avalanche:
                 return 'AVAX'
             case ChainId.BinanceSmartChain:
-                return 'BNB'
-            case ChainId.BitcoinCash:
-                return 'BCH'
+                return 'BEP20'
             case ChainId.Fuse:
                 return 'FUSE'
-            case ChainId.Near:
-                return 'NEAR'
             case ChainId.Polygon:
                 return 'MATIC'
             case ChainId.Solana:
-                return 'SOL'
+                return 'SOLANA'
             case ChainId.Terra:
-                return 'LUNA'
-            case ChainId.Rootstock:
-                return 'RSK'
+                return 'TERRA'
             case ChainId.Ethereum:
             case ChainId.Arbitrum:
-            default:
-                return 'ETH'
+                return 'ERC20'
         }
-
+        return null
     }
 
-    async lookupDomain(address: string, chainId: ChainId): Promise<Nullable<string>> {
+    async lookupDomain(address: string, asset: Asset): Promise<Nullable<string>> {
         try {
             const domain = this.preparedDomain(address)
             if (await this.isValidTLD(domain)) {
@@ -59,7 +61,7 @@ export class UNSResolver implements NameResolver {
                     {},
                     { headers: { "Authorization": `Bearer ${unsConfig.alchemyKey}` } }
                 )
-                return data?.records[this.getUNSKey(chainId)] ?? null
+                return data?.records[this.getUNSKey(asset)] ?? data?.records[this.getUNSKey(asset,true)] ?? null
             }
             return null
         } catch (e) {
